@@ -1,12 +1,10 @@
 package com.dmslob;
 
 import com.dmslob.entity.Contact;
+import jakarta.persistence.Timeout;
 import jakarta.persistence.metamodel.SingularAttribute;
 import jakarta.persistence.metamodel.StaticMetamodel;
-import org.hibernate.LockMode;
-import org.hibernate.Session;
-import org.hibernate.SessionFactory;
-import org.hibernate.StatelessSession;
+import org.hibernate.*;
 import org.hibernate.cfg.Configuration;
 import org.hibernate.query.Order;
 import org.hibernate.query.Page;
@@ -25,6 +23,7 @@ public class HibernateTest {
     SessionFactory sessionFactory() {
         return new Configuration()
                 .configure("hibernate.cfg.xml")
+                //.setProperty("serverTimezone", "Europe/Tallinn")
                 .buildSessionFactory();
     }
 
@@ -112,6 +111,45 @@ public class HibernateTest {
             String query = "SELECT g.series FROM generate_series(1,5) AS g(series)";
             return session.createNativeQuery(query, Integer.class)
                     .getResultList();
+        }
+    }
+
+
+    record Person(String name, String email, String phone) {}
+
+    List<Person> jsonTable(SessionFactory sessionFactory) {
+        try (Session session = sessionFactory.openSession()) {
+            String query = """
+                    SELECT pl.name, pl.email, pl.phone\s
+                    FROM contacts cts,\s
+                    json_table(
+                    	payload,\s
+                    	'$'\s
+                    	COLUMNS (
+                    		"name" VARCHAR(255) PATH '$.name',
+                    		"email" VARCHAR(255) PATH '$.email',
+                    		"phone" VARCHAR(255) PATH '$.phoneNumber'
+                    	)
+                    ) as pl;
+                    """;
+            return session.createNativeQuery(query, Person.class).getResultList();
+        }
+    }
+
+    // to run test we need to have postgres:17
+    // and test config with VM Options: -Duser.timezone=Europe/Kyiv
+    @Test
+    public void should_use_json_table() {
+        // given
+        var expectedPerson = new Person(
+                "Jack Doe",
+                "jack.doe@example.com",
+                "+80455645332");
+        try (SessionFactory sessionFactory = sessionFactory()) {
+            // when
+            var persons = jsonTable(sessionFactory);
+            // then
+            assertThat(persons).isEqualTo(List.of(expectedPerson));
         }
     }
 
